@@ -67,5 +67,13 @@ plans/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 
-groq.txt 
 archi.png
+groq.txt
+
+
+# Vagrant local state
+.vagrant/
+**/.vagrant/
+
+# Ansible retry files
+*.retry
