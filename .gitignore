@@ -69,3 +69,11 @@ plans/
 
 archi.png
 groq.txt
+
+
+# Vagrant local state
+.vagrant/
+**/.vagrant/
+
+# Ansible retry files
+*.retry
