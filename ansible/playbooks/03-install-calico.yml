@@ -1,0 +1,68 @@
+---
+- name: Install Calico CNI
+  hosts: masters
+  become: yes
+
+  vars:
+    calico_version: "v3.32.0"
+    calico_pod_cidr: "10.42.0.0/16"
+
+  tasks:
+    - name: Wait for Kubernetes API server to respond
+      command: k3s kubectl get nodes
+      register: api_check
+      retries: 30
+      delay: 10
+      until: api_check.rc == 0
+      changed_when: false
+
+    - name: Download Calico manifest
+      get_url:
+        url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
+        dest: /tmp/calico.yaml
+        mode: '0644'
+
+    - name: Configure Calico pod CIDR
+      replace:
+        path: /tmp/calico.yaml
+        regexp: '# - name: CALICO_IPV4POOL_CIDR\n#   value: "192.168.0.0/16"'
+        replace: '- name: CALICO_IPV4POOL_CIDR\n  value: "{{ calico_pod_cidr }}"'
+
+    - name: Apply Calico manifest
+      command: k3s kubectl apply -f /tmp/calico.yaml
+      register: calico_apply
+      changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
+
+    - name: Wait for Calico node pods to be created
+      command: k3s kubectl get pods -n kube-system -l k8s-app=calico-node
+      register: calico_node_pods
+      retries: 30
+      delay: 10
+      until: calico_node_pods.rc == 0
+      changed_when: false
+
+    - name: Wait for Calico node pods to be ready
+      command: k3s kubectl wait --for=condition=Ready pods -l k8s-app=calico-node -n kube-system --timeout=300s
+      changed_when: false
+
+    - name: Wait for Calico kube-controllers to be ready
+      command: k3s kubectl wait --for=condition=Available deployment/calico-kube-controllers -n kube-system --timeout=300s
+      changed_when: false
+
+    - name: Show Calico pods
+      command: k3s kubectl get pods -n kube-system -l k8s-app=calico-node -o wide
+      register: calico_pods
+      changed_when: false
+
+    - name: Display Calico pods
+      debug:
+        var: calico_pods.stdout_lines
+
+    - name: Show node status after Calico installation
+      command: k3s kubectl get nodes -o wide
+      register: node_status
+      changed_when: false
+
+    - name: Display node status
+      debug:
+        var: node_status.stdout_lines

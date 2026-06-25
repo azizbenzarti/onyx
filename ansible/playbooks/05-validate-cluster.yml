@@ -1,0 +1,62 @@
+---
+- name: Validate K3s cluster
+  hosts: masters
+  become: yes
+
+  tasks:
+    - name: Get cluster nodes
+      command: kubectl get nodes -o wide
+      register: nodes_output
+      changed_when: false
+
+    - name: Display cluster nodes
+      debug:
+        var: nodes_output.stdout_lines
+
+    - name: Check that all expected nodes exist
+      command: kubectl get node {{ item }}
+      loop:
+        - onyx-master
+        - onyx-worker-app
+        - onyx-worker-ai
+      changed_when: false
+
+    - name: Wait until all nodes are Ready
+      command: kubectl wait --for=condition=Ready node/{{ item }} --timeout=300s
+      loop:
+        - onyx-master
+        - onyx-worker-app
+        - onyx-worker-ai
+      changed_when: false
+
+    - name: Get system pods
+      command: kubectl get pods -n kube-system -o wide
+      register: kube_system_pods
+      changed_when: false
+
+    - name: Display kube-system pods
+      debug:
+        var: kube_system_pods.stdout_lines
+
+    - name: Check Calico node pods
+      command: kubectl get pods -n kube-system -l k8s-app=calico-node -o wide
+      register: calico_pods
+      changed_when: false
+
+    - name: Display Calico pods
+      debug:
+        var: calico_pods.stdout_lines
+
+    - name: Count Ready nodes
+      shell: kubectl get nodes --no-headers | awk '$2 == "Ready" {print $1}' | wc -l
+      register: ready_node_count
+      changed_when: false
+
+    - name: Fail if less than 3 nodes are Ready
+      fail:
+        msg: "Cluster validation failed. Expected 3 Ready nodes, got {{ ready_node_count.stdout }}."
+      when: ready_node_count.stdout | int < 3
+
+    - name: Final validation message
+      debug:
+        msg: "Cluster validation successful: all 3 nodes are Ready."

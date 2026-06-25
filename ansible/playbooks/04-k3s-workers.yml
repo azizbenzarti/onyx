@@ -1,0 +1,38 @@
+---
+- name: Join K3s worker nodes to the cluster
+  hosts: workers
+  become: yes
+
+  vars:
+    k3s_token_file: "./generated/k3s-node-token"
+    k3s_master_ip_file: "./generated/k3s-master-ip"
+
+  tasks:
+    - name: Read K3s node token from local file
+      set_fact:
+        k3s_node_token: "{{ lookup('file', k3s_token_file) }}"
+
+    - name: Read K3s master IP from local file
+      set_fact:
+        k3s_master_ip: "{{ lookup('file', k3s_master_ip_file) }}"
+
+    - name: Install K3s agent and join cluster
+      shell: |
+        curl -sfL https://get.k3s.io | K3S_URL="https://{{ k3s_master_ip }}:6443" K3S_TOKEN="{{ k3s_node_token }}" INSTALL_K3S_EXEC="agent --node-ip={{ ansible_host }}" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Ensure K3s agent service is started and enabled
+      systemd:
+        name: k3s-agent
+        state: started
+        enabled: yes
+
+    - name: Check K3s agent service status
+      command: systemctl is-active k3s-agent
+      register: k3s_agent_status
+      changed_when: false
+
+    - name: Display K3s agent service status
+      debug:
+        msg: "{{ inventory_hostname }} k3s-agent status: {{ k3s_agent_status.stdout }}"

@@ -1,0 +1,99 @@
+---
+- name: Install K3s with Calico support on server 
+  hosts: masters
+  become: yes
+
+  vars:
+    k3s_master_ip: "{{ ansible_host }}"
+    k3s_cluster_cidr: "10.42.0.0/16"
+    k3s_service_cidr: "10.43.0.0/16"
+
+  tasks:
+    - name: Install K3s server without Flannel
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
+          --flannel-backend=none \
+          --disable-network-policy \
+          --disable-cloud-controller \
+          --cluster-cidr={{ k3s_cluster_cidr }} \
+          --service-cidr={{ k3s_service_cidr }} \
+          --node-ip={{ k3s_master_ip }} \
+          --advertise-address={{ k3s_master_ip }} \
+          --tls-san={{ k3s_master_ip }} \
+          --write-kubeconfig-mode=644" sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for K3s service to be active
+      systemd:
+        name: k3s
+        state: started
+        enabled: yes
+
+    - name: Create kubeconfig directory for vagrant user
+      file:
+        path: /home/vagrant/.kube
+        state: directory
+        owner: vagrant
+        group: vagrant
+        mode: '0755'
+
+    - name: Copy kubeconfig to vagrant user
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /home/vagrant/.kube/config
+        owner: vagrant
+        group: vagrant
+        mode: '0600'
+        remote_src: yes
+
+    - name: Replace localhost with master IP in kubeconfig
+      replace:
+        path: /home/vagrant/.kube/config
+        regexp: 'https://127.0.0.1:6443'
+        replace: 'https://{{ k3s_master_ip }}:6443'
+
+    - name: Create kubectl symlink
+      file:
+        src: /usr/local/bin/k3s
+        dest: /usr/local/bin/kubectl
+        state: link
+        force: yes
+
+    - name: Read K3s node token
+      slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_token_raw
+
+    - name: Create local generated directory
+      file:
+        path: ./generated
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: no
+
+    - name: Save K3s node token locally
+      copy:
+        content: "{{ k3s_token_raw.content | b64decode }}"
+        dest: ./generated/k3s-node-token
+        mode: '0600'
+      delegate_to: localhost
+      become: no
+
+    - name: Save master IP locally
+      copy:
+        content: "{{ k3s_master_ip }}"
+        dest: ./generated/k3s-master-ip
+        mode: '0644'
+      delegate_to: localhost
+      become: no
+
+    - name: Show K3s master status
+      command: kubectl get nodes -o wide
+      register: master_status
+      changed_when: false
+
+    - name: Display K3s master status
+      debug:
+        var: master_status.stdout_lines
